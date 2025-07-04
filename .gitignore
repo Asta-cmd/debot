@@ -1,0 +1,27 @@
+# Abaikan file lingkungan virtual
+venv/
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# File sementara editor
+*.swp
+*.swo
+*.bak
+
+# Jupyter / notebook
+.ipynb_checkpoints/
+
+# Log / cache
+*.log
+.cache/
+.pip/
+
+# IDE & editor
+.vscode/
+.idea/
+
+# Railway auto-generated
+railway.json
