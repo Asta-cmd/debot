@@ -16,7 +16,7 @@ async def is_subscribed(user_id):
     except:
         return False
 
-# --- Start Command: Baca atau Kirim Menfes ---
+# --- /start handler ---
 @dp.message_handler(commands=['start'])
 async def start_cmd(msg: types.Message):
     args = msg.get_args()
@@ -29,12 +29,12 @@ async def start_cmd(msg: types.Message):
         return await msg.answer("Kamu harus join channel dulu sebelum lanjut!", reply_markup=keyboard)
 
     if args:
-        # --- Baca Menfes ---
+        # --- Baca Menfes dari deeplink ---
         await msg.answer(f"📨 Kamu mendapat pesan anonim:\n\n\"{args}\"")
     else:
         await msg.answer("Ketik pesan anonim yang ingin kamu kirim. Balas pesan ini.")
 
-# --- Menangani Pesan Menfes (tanpa command) ---
+# --- Menangani pesan biasa (Menfes) ---
 @dp.message_handler(lambda message: not message.text.startswith('/'))
 async def handle_menfes(msg: types.Message):
     if not await is_subscribed(msg.from_user.id):
@@ -44,7 +44,7 @@ async def handle_menfes(msg: types.Message):
     deep_link = f"https://t.me/{(await bot.get_me()).username}?start={encoded}"
     await msg.reply(f"🔗 Bagikan link ini ke targetmu:\n{deep_link}")
 
-# --- Tombol Retry untuk FSub ---
+# --- Tombol Retry ---
 @dp.callback_query_handler(lambda c: c.data == 'retry')
 async def retry_check(callback_query: types.CallbackQuery):
     if await is_subscribed(callback_query.from_user.id):
@@ -54,3 +54,4 @@ async def retry_check(callback_query: types.CallbackQuery):
 
 if __name__ == '__main__':
     executor.start_polling(dp)
+    
