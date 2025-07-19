@@ -13,12 +13,12 @@ CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")  # contoh: @namachannel
 # Setup database SQLite
 conn = sqlite3.connect("media.db", check_same_thread=False)
 cur = conn.cursor()
-cur.execute("""
+cur.execute('''
     CREATE TABLE IF NOT EXISTS media (
         code TEXT PRIMARY KEY,
         file_id TEXT NOT NULL
     )
-""")
+''')
 conn.commit()
 
 # Saat user kirim media
@@ -45,10 +45,10 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Kirim link ke channel
     await context.bot.send_message(
-        chat_id=CHANNEL_USERNAME,
-        text=f"📎 File baru:
-{deeplink}"
-    )
+    chat_id=CHANNEL_USERNAME,
+    text=f"📎 File baru:\n{deeplink}"
+)
+
 
     await message.reply_text("✅ File berhasil dikonversi dan dikirim ke channel.")
 
