@@ -45,10 +45,9 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Kirim link ke channel
     await context.bot.send_message(
-    chat_id=CHANNEL_USERNAME,
-    text=f"📎 File baru:\n{deeplink}"
-)
-
+        chat_id=CHANNEL_USERNAME,
+        text=f"📎 File baru:\n{deeplink}"
+    )
 
     await message.reply_text("✅ File berhasil dikonversi dan dikirim ke channel.")
 
@@ -69,13 +68,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("⚠️ File tidak ditemukan atau sudah kadaluarsa.")
 
-async def main():
+# Langsung jalankan polling (tanpa asyncio.run)
+if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_media))
-    print("Bot is running...")
-    await app.run_polling()
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    print("Bot is running...")
+    app.run_polling()
+    
