@@ -52,8 +52,8 @@ async def send_file_if_allowed(update, context, code):
 
     if not (in_channel and in_group):
         buttons = [
-            [InlineKeyboardButton("JOIN CHANNEL", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}")],
-            [InlineKeyboardButton("COBALAGI", callback_data=f"recheck_{code}")]
+            [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}")],
+            [InlineKeyboardButton("🔁 Saya sudah join", callback_data=f"recheck_{code}")]
         ]
         await context.bot.send_message(
             chat_id=chat_id,
@@ -106,5 +106,48 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_type = None
 
         if message.photo:
-            file_id = mes_
-                         
+            file_id = message.photo[-1].file_id
+            file_type = "photo"
+        elif message.video:
+            file_id = message.video.file_id
+            file_type = "video"
+        elif message.document:
+            file_id = message.document.file_id
+            file_type = "document"
+        else:
+            await message.reply_text("Kirim foto, video, atau dokumen.")
+            return
+
+        code = uuid4().hex[:10]
+        cur.execute("INSERT INTO media (code, file_id, file_type) VALUES (?, ?, ?)", (code, file_id, file_type))
+        conn.commit()
+
+        deeplink = f"https://t.me/{context.bot.username}?start=media_{code}"
+
+        await context.bot.send_message(
+            chat_id=CHANNEL_USERNAME,
+            text=f"📎 File baru:\n{deeplink}"
+        )
+
+        await message.reply_text("✓ File sudah terkirim")
+
+    except Exception as e:
+        logging.error("❌ Gagal memproses media:", exc_info=True)
+        await update.message.reply_text("⚠️ Gagal memproses media.")
+
+# Error global
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logging.error("❌ Exception caught:", exc_info=context.error)
+    if isinstance(update, Update) and update.message:
+        await update.message.reply_text("⚠️ Terjadi kesalahan. Silakan coba lagi nanti.")
+
+# Run bot
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_media))
+    app.add_handler(CallbackQueryHandler(handle_recheck))
+    app.add_error_handler(error_handler)
+
+    print("Bot is running...")
+    app.run_polling()
