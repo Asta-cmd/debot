@@ -50,10 +50,10 @@ async def send_file_if_allowed(update, context, code):
 
     if not (in_channel and in_group1 and in_group2):
         buttons = [
-            [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}")],
-            [InlineKeyboardButton("👥 Join Group 1", url=GROUP_LINK_1)],
-            [InlineKeyboardButton("👥 Join Group 2", url=GROUP_LINK_2)],
-            [InlineKeyboardButton("🔁 Saya sudah join", callback_data=f"recheck_{code}")]
+            [InlineKeyboardButton("Jᴏɪɴ Cʜᴀɴɴᴇʟ", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}")],
+            [InlineKeyboardButton("Jᴏɪɴ ɢʀᴜᴘ", url=GROUP_LINK_1)],
+            [InlineKeyboardButton("Jᴏɪɴ ɢʀᴜᴘ", url=GROUP_LINK_2)],
+            [InlineKeyboardButton("ᴄᴏʙᴀ ʟᴀɢɪ", callback_data=f"recheck_{code}")]
         ]
         await context.bot.send_message(
             chat_id=chat_id,
