@@ -2,11 +2,19 @@ import os
 import sqlite3
 import logging
 from uuid import uuid4
-from telegram import Update
+from telegram import (
+    Update, InlineKeyboardButton, InlineKeyboardMarkup
+)
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, filters
+    ContextTypes, filters, CallbackQueryHandler
 )
+
+# Konfigurasi
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")      # Channel tempat link dikirim
+REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL")      # Channel yang wajib diikuti (@namachannel)
+REQUIRED_GROUP = os.getenv("REQUIRED_GROUP")          # Grup yang wajib diikuti (@namagroup)
 
 # Logging
 logging.basicConfig(
@@ -14,10 +22,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")  # contoh: @namachannel
-
-# Database setup
+# Database
 conn = sqlite3.connect("media.db", check_same_thread=False)
 cur = conn.cursor()
 cur.execute('''
@@ -29,15 +34,76 @@ cur.execute('''
 ''')
 conn.commit()
 
-# Error handler global
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logging.error("❌ Exception caught:", exc_info=context.error)
-    if isinstance(update, Update) and update.message:
-        await update.message.reply_text("⚠️ Terjadi kesalahan. Silakan coba lagi nanti.")
+# Cek apakah user member channel/grup
+async def is_user_member(bot, chat_username, user_id):
+    try:
+        member = await bot.get_chat_member(chat_username, user_id)
+        return member.status in ("member", "administrator", "creator")
+    except:
+        return False
 
-# Saat user kirim media
+# Kirim file jika user sudah join
+async def send_file_if_allowed(update, context, code):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    in_channel = await is_user_member(context.bot, REQUIRED_CHANNEL, user_id)
+    in_group = await is_user_member(context.bot, REQUIRED_GROUP, user_id)
+
+    if not (in_channel and in_group):
+        buttons = [
+            [InlineKeyboardButton("JOIN SINI", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}")],
+            [InlineKeyboardButton("JOIN SINI", url=f"https://t.me/{REQUIRED_GROUP.lstrip('@')}")],
+            [InlineKeyboardButton("COBALAGI", callback_data=f"recheck_{code}")]
+        ]
+        markup = InlineKeyboardMarkup(buttons)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Untuk mengakses file ini, silakan join channel & grup terlebih dahulu.",
+            reply_markup=markup
+        )
+        return
+
+    cur.execute("SELECT file_id, file_type FROM media WHERE code = ?", (code,))
+    row = cur.fetchone()
+
+    if row:
+        file_id, file_type = row
+        if file_type == "photo":
+            await context.bot.send_photo(chat_id=chat_id, photo=file_id)
+        elif file_type == "video":
+            await context.bot.send_video(chat_id=chat_id, video=file_id)
+        else:
+            await context.bot.send_document(chat_id=chat_id, document=file_id)
+    else:
+        await context.bot.send_message(chat_id=chat_id, text="⚠️ File tidak ditemukan.")
+
+# Handler start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if not args or not args[0].startswith("media_"):
+        await update.message.reply_text("Halo! Kirim file ke bot untuk mendapatkan tautan.")
+        return
+
+    code = args[0].replace("media_", "")
+    await send_file_if_allowed(update, context, code)
+
+# Handler jika klik "Saya sudah join"
+async def handle_recheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data.startswith("recheck_"):
+        code = query.data.replace("recheck_", "")
+        await send_file_if_allowed(query, context, code)
+
+# Handler media (DM saja)
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        # Batasi hanya chat pribadi
+        if update.message.chat.type != "private":
+            return
+
         message = update.message
         file_id = None
         file_type = None
@@ -66,47 +132,26 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"📎 File baru:\n{deeplink}"
         )
 
-        await message.reply_text("✓File berhasil dikirim")
+        await message.reply_text("✓ File sudah terkirim")
 
     except Exception as e:
         logging.error("❌ Gagal memproses media:", exc_info=True)
         await update.message.reply_text("⚠️ Gagal memproses media.")
 
-# Saat user klik deeplink
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        args = context.args
-        if not args or not args[0].startswith("media_"):
-            await update.message.reply_text("Halo! Kirim file ke bot untuk mendapatkan tautan.")
-            return
+# Error global
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logging.error("❌ Exception caught:", exc_info=context.error)
+    if isinstance(update, Update) and update.message:
+        await update.message.reply_text("⚠️ Terjadi kesalahan. Silakan coba lagi nanti.")
 
-        code = args[0].replace("media_", "")
-        cur.execute("SELECT file_id, file_type FROM media WHERE code = ?", (code,))
-        row = cur.fetchone()
-
-        if row:
-            file_id, file_type = row
-
-            if file_type == "photo":
-                await update.message.reply_photo(file_id)
-            elif file_type == "video":
-                await update.message.reply_video(file_id)
-            else:
-                await update.message.reply_document(file_id)
-        else:
-            await update.message.reply_text("⚠️ File tidak ditemukan atau sudah kadaluarsa.")
-
-    except Exception as e:
-        logging.error("❌ Gagal memproses start handler:", exc_info=True)
-        await update.message.reply_text("⚠️ Terjadi kesalahan saat mengambil file.")
-
-# Jalankan aplikasi
+# Run
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_media))
+    app.add_handler(CallbackQueryHandler(handle_recheck))
     app.add_error_handler(error_handler)
 
     print("Bot is running...")
     app.run_polling()
-        
+    
