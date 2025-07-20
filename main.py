@@ -52,8 +52,8 @@ async def send_file_if_allowed(update, context, code):
 
     if not (in_channel and in_group):
         buttons = [
-            [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}")],
-            [InlineKeyboardButton("🔁 Saya sudah join", callback_data=f"recheck_{code}")]
+            [InlineKeyboardButton("JOIN CHANNEL", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}")],
+            [InlineKeyboardButton("COBA LAGI", callback_data=f"recheck_{code}")]
         ]
         await context.bot.send_message(
             chat_id=chat_id,
@@ -62,7 +62,6 @@ async def send_file_if_allowed(update, context, code):
         )
         return
 
-    # Kirim file
     cur.execute("SELECT file_id, file_type FROM media WHERE code = ?", (code,))
     row = cur.fetchone()
 
@@ -91,9 +90,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_recheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
     if query.data.startswith("recheck_"):
         code = query.data.replace("recheck_", "")
-        await send_file_if_allowed(query, context, code)
+        user_id = query.from_user.id
+        chat_id = query.message.chat.id
+
+        in_channel = await is_user_member(context.bot, REQUIRED_CHANNEL, user_id)
+        in_group = await is_user_member(context.bot, REQUIRED_GROUP, user_id)
+
+        if not (in_channel and in_group):
+            await query.message.reply_text("❗ Kamu belum join semuanya.")
+            return
+
+        cur.execute("SELECT file_id, file_type FROM media WHERE code = ?", (code,))
+        row = cur.fetchone()
+
+        if row:
+            file_id, file_type = row
+            if file_type == "photo":
+                await context.bot.send_photo(chat_id=chat_id, photo=file_id)
+            elif file_type == "video":
+                await context.bot.send_video(chat_id=chat_id, video=file_id)
+            else:
+                await context.bot.send_document(chat_id=chat_id, document=file_id)
+        else:
+            await query.message.reply_text("⚠️ File tidak ditemukan.")
 
 # Terima media (hanya dari DM)
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -151,3 +173,4 @@ if __name__ == "__main__":
 
     print("Bot is running...")
     app.run_polling()
+                                  
