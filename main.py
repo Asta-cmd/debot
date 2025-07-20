@@ -10,11 +10,12 @@ from telegram.ext import (
     ContextTypes, filters, CallbackQueryHandler
 )
 
-# Konfigurasi
+# Konfigurasi dari ENV
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")      # Channel tempat link dikirim
-REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL")      # Channel yang wajib diikuti (@namachannel)
-REQUIRED_GROUP = os.getenv("REQUIRED_GROUP")          # Grup yang wajib diikuti (@namagroup)
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")           # Channel tempat kirim link
+REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL")           # @channel_wajib_join
+REQUIRED_GROUP = os.getenv("REQUIRED_GROUP")               # chat_id grup wajib, contoh: -1001234567890
+GROUP_INVITE_LINK = os.getenv("GROUP_INVITE_LINK")         # Link undangan ke grup
 
 # Logging
 logging.basicConfig(
@@ -22,7 +23,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Database
+# Database SQLite
 conn = sqlite3.connect("media.db", check_same_thread=False)
 cur = conn.cursor()
 cur.execute('''
@@ -34,15 +35,15 @@ cur.execute('''
 ''')
 conn.commit()
 
-# Cek apakah user member channel/grup
-async def is_user_member(bot, chat_username, user_id):
+# Fungsi cek member
+async def is_user_member(bot, chat, user_id):
     try:
-        member = await bot.get_chat_member(chat_username, user_id)
+        member = await bot.get_chat_member(chat, user_id)
         return member.status in ("member", "administrator", "creator")
     except:
         return False
 
-# Kirim file jika user sudah join
+# Kirim file jika sudah join
 async def send_file_if_allowed(update, context, code):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
@@ -52,18 +53,19 @@ async def send_file_if_allowed(update, context, code):
 
     if not (in_channel and in_group):
         buttons = [
-            [InlineKeyboardButton("JOIN SINI", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}")],
-            [InlineKeyboardButton("JOIN SINI", url=f"https://t.me/{REQUIRED_GROUP.lstrip('@')}")],
-            [InlineKeyboardButton("COBALAGI", callback_data=f"recheck_{code}")]
+            [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}")],
+            [InlineKeyboardButton("👥 Join Grup", url=GROUP_INVITE_LINK)],
+            [InlineKeyboardButton("🔁 Saya sudah join", callback_data=f"recheck_{code}")]
         ]
         markup = InlineKeyboardMarkup(buttons)
         await context.bot.send_message(
             chat_id=chat_id,
-            text="Untuk mengakses file ini, silakan join channel & grup terlebih dahulu.",
+            text="🚫 Untuk mengakses file ini, silakan join channel & grup terlebih dahulu.",
             reply_markup=markup
         )
         return
 
+    # Sudah join → kirim file
     cur.execute("SELECT file_id, file_type FROM media WHERE code = ?", (code,))
     row = cur.fetchone()
 
@@ -78,7 +80,7 @@ async def send_file_if_allowed(update, context, code):
     else:
         await context.bot.send_message(chat_id=chat_id, text="⚠️ File tidak ditemukan.")
 
-# Handler start
+# Handler /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args or not args[0].startswith("media_"):
@@ -88,7 +90,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = args[0].replace("media_", "")
     await send_file_if_allowed(update, context, code)
 
-# Handler jika klik "Saya sudah join"
+# Handler tombol "Saya sudah join"
 async def handle_recheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -97,10 +99,10 @@ async def handle_recheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
         code = query.data.replace("recheck_", "")
         await send_file_if_allowed(query, context, code)
 
-# Handler media (DM saja)
+# Handler media (DM only)
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        # Batasi hanya chat pribadi
+        # Tolak jika dari grup
         if update.message.chat.type != "private":
             return
 
@@ -138,13 +140,13 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error("❌ Gagal memproses media:", exc_info=True)
         await update.message.reply_text("⚠️ Gagal memproses media.")
 
-# Error global
+# Error handler
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logging.error("❌ Exception caught:", exc_info=context.error)
     if isinstance(update, Update) and update.message:
         await update.message.reply_text("⚠️ Terjadi kesalahan. Silakan coba lagi nanti.")
 
-# Run
+# Jalankan bot
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
