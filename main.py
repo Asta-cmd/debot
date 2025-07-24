@@ -1,168 +1,154 @@
 import os
-import sqlite3
 import logging
-from uuid import uuid4
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, filters, CallbackQueryHandler
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+    ContextTypes,
 )
-
-# ENV
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")
-REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL")
-REQUIRED_GROUP_1 = os.getenv("REQUIRED_GROUP_1")
-REQUIRED_GROUP_2 = os.getenv("REQUIRED_GROUP_2")
-GROUP_LINK_1 = os.getenv("GROUP_LINK_1")
-GROUP_LINK_2 = os.getenv("GROUP_LINK_2")
+from telegram.error import BadRequest
 
 # Logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# DB setup
-conn = sqlite3.connect("media.db", check_same_thread=False)
-cur = conn.cursor()
-cur.execute('''
-CREATE TABLE IF NOT EXISTS media (
-    code TEXT PRIMARY KEY,
-    file_id TEXT NOT NULL,
-    file_type TEXT NOT NULL
-)''')
-conn.commit()
+# Waktu terakhir restart
+start_time = datetime.now()
 
-# Cek apakah user sudah join
-async def is_user_member(bot, chat_id, user_id):
+# Variabel dari .env atau hardcode sementara
+BOT_TOKEN = os.getenv("BOT_TOKEN", "ISI_TOKEN_BOT")
+OWNER_ID = int(os.getenv("OWNER_ID", "123456789"))
+REQUIRED_GROUPS = os.getenv("REQUIRED_GROUPS", "-100123,-100456").split(",")
+REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "-100789")
+
+# Simpan media
+MEDIA_DB = {}
+
+def get_deeplink(code: str):
+    return f"https://t.me/{os.getenv('BOT_USERNAME', 'YourBotUsername')}?start=media_{code}"
+
+async def is_user_member(bot, user_id: int, chat_id: int) -> bool:
     try:
         member = await bot.get_chat_member(chat_id, user_id)
-        return member.status in ("member", "administrator", "creator")
-    except:
+        return member.status in ["member", "administrator", "creator"]
+    except BadRequest:
         return False
 
-# Kirim file kalau sudah join semua
-async def send_file_if_allowed(update, context, code):
+async def validate_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
+    bot = context.bot
+    not_joined = []
 
-    in_channel = await is_user_member(context.bot, REQUIRED_CHANNEL, user_id)
-    in_group1 = await is_user_member(context.bot, REQUIRED_GROUP_1, user_id)
-    in_group2 = await is_user_member(context.bot, REQUIRED_GROUP_2, user_id)
+    if REQUIRED_CHANNEL and not await is_user_member(bot, user_id, int(REQUIRED_CHANNEL)):
+        not_joined.append(("Join Channel", f"https://t.me/c/{str(REQUIRED_CHANNEL)[4:]}"))
 
-    if not (in_channel and in_group1 and in_group2):
-        buttons = [
-            [InlineKeyboardButton("Jᴏɪɴ Cʜᴀɴɴᴇʟ", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}")],
-            [InlineKeyboardButton("Jᴏɪɴ ɢʀᴜᴘ", url=GROUP_LINK_1)],
-            [InlineKeyboardButton("Jᴏɪɴ ɢʀᴜᴘ", url=GROUP_LINK_2)],
-            [InlineKeyboardButton("ᴄᴏʙᴀ ʟᴀɢɪ", callback_data=f"recheck_{code}")]
-        ]
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="❌ Kamu harus join semua sebelum mengakses file ini.",
-            reply_markup=InlineKeyboardMarkup(buttons)
+    for group_id in REQUIRED_GROUPS:
+        group_id = group_id.strip()
+        if group_id and not await is_user_member(bot, user_id, int(group_id)):
+            not_joined.append(("Join Grup", f"https://t.me/c/{str(group_id)[4:]}"))
+
+    if not_joined:
+        tombol = [[InlineKeyboardButton(nama, url=link)] for nama, link in not_joined]
+        tombol.append([InlineKeyboardButton("Coba Lagi", callback_data="check_join")])
+        await update.message.reply_text(
+            " Untuk membuka media silahkan klik join lalu coba lagi. pastikan sudah join semua.",
+            reply_markup=InlineKeyboardMarkup(tombol)
         )
-        return
+        return False
+    return True
 
-    cur.execute("SELECT file_id, file_type FROM media WHERE code = ?", (code,))
-    row = cur.fetchone()
-
-    if row:
-        file_id, file_type = row
-        if file_type == "photo":
-            await context.bot.send_photo(chat_id=chat_id, photo=file_id)
-        elif file_type == "video":
-            await context.bot.send_video(chat_id=chat_id, video=file_id)
-        else:
-            await context.bot.send_document(chat_id=chat_id, document=file_id)
-    else:
-        await context.bot.send_message(chat_id=chat_id, text="⚠️ File tidak ditemukan.")
-
-# /start handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    if not args or not args[0].startswith("media_"):
-        await update.message.reply_text("Halo! Kirim file ke bot untuk mendapatkan tautan.")
+    if update.message.text.startswith("/start media_"):
+        code = update.message.text.split("_")[1]
+        if not await validate_membership(update, context):
+            return
+
+        if code in MEDIA_DB:
+            file_type, file_id, caption = MEDIA_DB[code]
+            if file_type == "photo":
+                await update.message.reply_photo(photo=file_id, caption=caption)
+            elif file_type == "video":
+                await update.message.reply_video(video=file_id, caption=caption)
+            elif file_type == "document":
+                await update.message.reply_document(document=file_id, caption=caption)
+        else:
+            await update.message.reply_text(" File tidak ditemukan.")
+    else:
+        await update.message.reply_text(" Halo! Kirim file ke bot ini lewat pesan pribadi.")
+
+async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat.type != "private":
         return
 
-    code = args[0].replace("media_", "")
-    await send_file_if_allowed(update, context, code)
+    file_id = None
+    file_type = None
+    caption = update.message.caption or ""
 
-# Tombol "Saya sudah join"
-async def handle_recheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.photo:
+        file_id = update.message.photo[-1].file_id
+        file_type = "photo"
+    elif update.message.video:
+        file_id = update.message.video.file_id
+        file_type = "video"
+    elif update.message.document:
+        file_id = update.message.document.file_id
+        file_type = "document"
+
+    if file_id and file_type:
+        code = str(len(MEDIA_DB) + 1).zfill(6)
+        MEDIA_DB[code] = (file_type, file_id, caption)
+
+        deeplink = get_deeplink(code)
+        await update.message.reply_text(
+            f"✅ File sudah terkirim!\n\n🔗 Link: {deeplink}"
+        )
+
+async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if query.data.startswith("recheck_"):
-        code = query.data.replace("recheck_", "")
-        user_id = query.from_user.id
-        chat_id = query.message.chat.id
+    await start(update, context)
 
-        in_channel = await is_user_member(context.bot, REQUIRED_CHANNEL, user_id)
-        in_group1 = await is_user_member(context.bot, REQUIRED_GROUP_1, user_id)
-        in_group2 = await is_user_member(context.bot, REQUIRED_GROUP_2, user_id)
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uptime = datetime.now() - start_time
+    await update.message.reply_text(f"✅ Bot hidup\n⏱ Uptime: {uptime}")
 
-        if not (in_channel and in_group1 and in_group2):
-            await query.message.reply_text("❗ Kamu belum join semuanya.")
-            return
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
 
-        cur.execute("SELECT file_id, file_type FROM media WHERE code = ?", (code,))
-        row = cur.fetchone()
-        if row:
-            file_id, file_type = row
-            if file_type == "photo":
-                await context.bot.send_photo(chat_id=chat_id, photo=file_id)
-            elif file_type == "video":
-                await context.bot.send_video(chat_id=chat_id, video=file_id)
-            else:
-                await context.bot.send_document(chat_id=chat_id, document=file_id)
-        else:
-            await query.message.reply_text("⚠️ File tidak ditemukan.")
+    text = update.message.text.split(" ", 1)
+    if len(text) < 2:
+        await update.message.reply_text("Gunakan: /broadcast isi pesan")
+        return
 
-# Terima media dari DM
-async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        if update.message.chat.type != "private":
-            return
+    msg = text[1]
+    success = 0
+    for user_id in set(update.message.bot_data.get("users", [])):
+        try:
+            await context.bot.send_message(chat_id=user_id, text=msg)
+            success += 1
+        except:
+            pass
 
-        message = update.message
-        file_id, file_type = None, None
+    await update.message.reply_text(f"✅ Broadcast terkirim ke {success} user.")
 
-        if message.photo:
-            file_id = message.photo[-1].file_id
-            file_type = "photo"
-        elif message.video:
-            file_id = message.video.file_id
-            file_type = "video"
-        elif message.document:
-            file_id = message.document.file_id
-            file_type = "document"
-        else:
-            await message.reply_text("Kirim foto, video, atau dokumen.")
-            return
+async def save_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat.type == "private":
+        context.bot_data.setdefault("users", set()).add(update.effective_user.id)
 
-        code = uuid4().hex[:10]
-        cur.execute("INSERT INTO media (code, file_id, file_type) VALUES (?, ?, ?)", (code, file_id, file_type))
-        conn.commit()
-
-        deeplink = f"https://t.me/{context.bot.username}?start=media_{code}"
-        await context.bot.send_message(chat_id=CHANNEL_USERNAME, text=f"📎 File baru:\n{deeplink}")
-        await message.reply_text("✓ File sudah terkirim")
-
-    except Exception as e:
-        logging.error("❌ Gagal memproses media:", exc_info=True)
-        await update.message.reply_text("⚠️ Gagal memproses media.")
-
-# Error handler
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logging.error("❌ Exception caught:", exc_info=context.error)
-    if isinstance(update, Update) and update.message:
-        await update.message.reply_text("⚠️ Terjadi kesalahan.")
-
-# RUN
-if __name__ == "__main__":
+if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_media))
-    app.add_handler(CallbackQueryHandler(handle_recheck))
-    app.add_error_handler(error_handler)
-    print("Bot is running...")
+    app.add_handler(CommandHandler("ping", ping))
+    app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(CallbackQueryHandler(check_join, pattern="check_join"))
+    app.add_handler(MessageHandler(filters.ALL, save_user))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, media_handler))
+
     app.run_polling()
-                                  
+    
